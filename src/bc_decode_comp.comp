@@ -1,0 +1,8 @@
+#version 450
+layout(local_size_x = 64) in;
+layout(binding = 0) readonly buffer Src { uint data[]; } src;
+layout(binding = 1) writeonly buffer Dst { vec4 pixels[]; } dst;
+void main() {
+  uint idx = gl_GlobalInvocationID.x;
+  dst.pixels[idx] = vec4(0.0, 0.0, 0.0, 1.0);
+}
