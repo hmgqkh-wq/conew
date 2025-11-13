@@ -1,0 +1,11 @@
+{
+  "name": "default",
+  "clamp_limits": {
+    "maxImageDimension2D": 16384,
+    "maxBoundDescriptorSets": 8
+  },
+  "features": {
+    "descriptorIndexing": false,
+    "timelineSemaphore": true
+  }
+}
