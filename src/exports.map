@@ -1,0 +1,6 @@
+VULKAN_1 {
+  global:
+    vk*;
+  local:
+    *;
+};
