@@ -1,0 +1,6 @@
+{
+  "driver": "Xclipse940Wrapper",
+  "version": "0.6.0",
+  "api": "Vulkan 1.3",
+  "notes": "Forwarding wrapper with profile engine, pipeline cache hooks, BCn fallback, and conservative capability exposure for stability."
+}
