@@ -1,4 +1,4 @@
-name: build-android-arm64
+name: build-android-arm64-ndk-only
 
 on:
   workflow_dispatch:
@@ -13,12 +13,14 @@ jobs:
     env:
       ANDROID_PLATFORM: "31"
       NDK_VERSION: "r25b"
+      BUILD_DIR: build
+      PKG_DIR: pkg
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install base deps
+      - name: Install minimal host deps
         run: |
           sudo apt-get update -y
           sudo apt-get install -y --no-install-recommends \
@@ -28,12 +30,8 @@ jobs:
             python3-pip \
             wget \
             git \
-            build-essential \
             clang \
-            gcc-aarch64-linux-gnu \
-            g++-aarch64-linux-gnu \
-            libc6-dev-arm64-cross \
-            pkg-config
+            build-essential
           pip3 install --upgrade pip
 
       - name: Setup Android NDK r25b
@@ -44,51 +42,61 @@ jobs:
       - name: Export NDK path
         run: echo "ANDROID_NDK_HOME=${{ steps.setup-ndk.outputs.ndk-path }}" >> $GITHUB_ENV
 
-      - name: Ensure glslc (shaderc) is available
+      - name: Show environment summary
         run: |
-          if command -v glslc >/dev/null 2>&1; then glslc --version; else
-            sudo apt-get install -y shaderc-tools || true
-            if ! command -v glslc >/dev/null 2>&1; then
-              wget -qO /tmp/glslc https://sdk.lunarg.com/sdk/download/1.3.261.1/linux/x86_64/glslc || true
-              chmod +x /tmp/glslc || true
-              sudo mv /tmp/glslc /usr/local/bin/glslc || true
-            fi
-            glslc --version || true
-          fi
+          echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME"
+          echo "NDK toolchain exists: $(test -f \"$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake\" && echo yes || echo no)"
 
-      - name: Configure build (Android arm64)
+      - name: Configure build (Android arm64 using NDK)
+        id: cmake_config
         run: |
-          mkdir -p build
-          cmake -S . -B build -G Ninja \
+          rm -rf "${BUILD_DIR}"
+          cmake -S . -B "${BUILD_DIR}" -G Ninja \
             -DCMAKE_TOOLCHAIN_FILE="${ANDROID_NDK_HOME}/build/cmake/android.toolchain.cmake" \
             -DANDROID_ABI=arm64-v8a \
             -DANDROID_PLATFORM=${{ env.ANDROID_PLATFORM }} \
-            -DCMAKE_BUILD_TYPE=Release
+            -DCMAKE_BUILD_TYPE=Release \
+            -DANDROID_NDK="${ANDROID_NDK_HOME}" \
+            -DANDROID_STL=c++_static \
+            -Wdev
+        continue-on-error: false
 
       - name: Build
-        run: cmake --build build -j
+        id: cmake_build
+        run: |
+          cmake --build "${BUILD_DIR}" -j 2
+        continue-on-error: true
 
-      - name: Precompile BCn fallback shader
+      - name: Dump partial build log if build failed
+        if: failure()
+        run: |
+          echo "=== CMake configure output (last 200 lines) ==="
+          tail -n 200 "${BUILD_DIR}/CMakeFiles/CMakeOutput.log" || true
+          echo "=== Ninja build log (last 200 lines) ==="
+          tail -n 200 "${BUILD_DIR}/build.ninja" || true
+          # show last few lines of ninja stdout captured by actions
+          echo "=== Action: show 'build' step logs above for errors ==="
+          exit 1
+
+      - name: Precompile BCn fallback shader (optional)
         run: |
           mkdir -p build/shaders
           if command -v glslc >/dev/null 2>&1; then
             glslc src/bc_decode_comp.comp -o build/shaders/bc_decode_comp.spv
-            mkdir -p pkg/assets/shaders
-            cp build/shaders/bc_decode_comp.spv pkg/assets/shaders/
+            mkdir -p "${PKG_DIR}/assets/shaders"
+            cp build/shaders/bc_decode_comp.spv "${PKG_DIR}/assets/shaders/"
           else
             echo "glslc not available; skipping shader precompile"
           fi
 
       - name: Install to pkg
-        run: cmake --install build --prefix "$(pwd)/pkg"
+        run: cmake --install "${BUILD_DIR}" --prefix "$(pwd)/${PKG_DIR}"
 
       - name: Validate artifact
-        run: |
-          python3 tools/validate.py pkg/usr/lib/libvulkan.so icd_manifest.json
+        run: python3 tools/validate.py "${PKG_DIR}/usr/lib/libvulkan.so" icd_manifest.json
 
       - name: Package driver folder
-        run: |
-          python3 tools/package.py pkg xclipse940-driver.tar.zst
+        run: python3 tools/package.py "${PKG_DIR}" xclipse940-driver.tar.zst
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
